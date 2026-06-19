@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "example-vision-server": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/your/vision-server.js"
+      ],
+      "timeout": 600,
+      "disabledTools": [],
+      "env": {
+        "PROVIDER_BASE_URL": "https://api.example.com/v1",
+        "PROVIDER_API_KEY": "<YOUR_PROVIDER_API_KEY>",
+        "PROVIDER_TIMEOUT_MS": "300000",
+        "DOWNLOAD_TIMEOUT_MS": "300000"
+      }
+    },
+    "example-web-server": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/your/web-server.js"
+      ],
+      "env": {
+        "EXAMPLE_SEARCH_KEY": "<YOUR_SEARCH_API_KEY>",
+        "EXAMPLE_SEARCH_ID": "<YOUR_SEARCH_ENGINE_ID>"
+      }
+    }
+  }
+}

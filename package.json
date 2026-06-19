@@ -1,0 +1,18 @@
+{
+  "name": "mcp-agent-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js --config config/vision-web.json --host 127.0.0.1 --port 8787",
+    "dev": "node src/index.js --config config/default.json --host 127.0.0.1 --port 8787",
+    "stdio": "node src/index.js",
+    "ui": "node src/cli/ui.js",
+    "tunnel": "tools/cloudflared.exe tunnel --protocol http2 --url http://127.0.0.1:8787"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^8.5.2",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "^3.25.76"
+  }
+}

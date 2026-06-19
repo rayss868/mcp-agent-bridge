@@ -1,0 +1,51 @@
+{
+    "mcpServers": {
+        "example-stdio-server": {
+            "command": "node",
+            "args": [
+                "/absolute/path/to/your/server.js"
+            ],
+            "env": {
+                "EXAMPLE_API_KEY": "<YOUR_API_KEY>"
+            }
+        },
+        "example-python-server": {
+            "command": "uvx",
+            "args": [
+                "some-mcp-package"
+            ],
+            "disabled": true
+        },
+        "example-remote-bridge": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "mcp-remote@latest",
+                "https://mcp.example.com/mcp"
+            ],
+            "env": {
+                "AUTH_TOKEN": "<YOUR_BEARER_TOKEN>"
+            },
+            "disabled": true
+        },
+        "example-with-working-dir": {
+            "command": "node",
+            "args": [
+                "/absolute/path/to/your/server.js"
+            ],
+            "cwd": "/absolute/path/to/working/directory",
+            "timeout": 600,
+            "disabled": true,
+            "disabledTools": [
+                "dangerous_tool_name"
+            ]
+        },
+        "example-windows-binary": {
+            "command": "C:/path/to/your/tool.exe",
+            "args": [
+                "--mcp"
+            ],
+            "disabled": true
+        }
+    }
+}

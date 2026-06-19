@@ -1,0 +1,8 @@
+node_modules/
+*.log
+tools/cloudflared.exe
+
+# Real config files contain secrets and local paths - do NOT commit
+# Use the *.example.json templates as a starting point
+config/default.json
+config/vision-web.json
