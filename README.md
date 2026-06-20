@@ -283,36 +283,100 @@ flowchart LR
 
 ## 🛰️ Bridge meta tools
 
-The bridge exposes **5 tools at the gateway level** (prefix `bridge__`) that are always available regardless of which child servers are loaded.
+The bridge exposes **5 tools at the gateway level** (prefix `bridge__`) that are the **only** tools AI clients see. Child server tools are intentionally hidden from `tools/list` — clients must go through `bridge__execute` to reach them. This keeps the bridge as the single point of contact and gives a clean **1:1 contract between AI and bridge**: one command in, one (possibly batched) result out.
 
 ### `bridge__execute` 🚀
 
-**The primary way to interact with child MCP servers.**
+**The primary way to interact with child MCP servers.** Everything AI wants to do goes through this tool.
 
-Execute any tool on any loaded server. The response is returned **exactly as-is** from the child server (1:1 output).
+The response is returned **exactly as-is** from the child server (1:1 output). The bridge is a thin pass-through.
+
+**Supports two modes:**
+
+#### Single mode
+
+Call one tool:
+
+```json
+{
+  "server": "web-curl",
+  "tool": "fetch_api",
+  "args": {
+    "url": "https://api.example.com/data",
+    "method": "GET",
+    "limit": 1000
+  }
+}
+```
 
 **Args:**
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `server` | string | ✅ | Name of the MCP server (e.g. `"ssh-mcp"`, `"web-curl"`, `"vision-generator"`) |
+| `server` | string | ✅ | Name of the MCP server (e.g. `"ssh-mcp"`, `"web-curl"`, `"playwright-extension"`) |
 | `tool` | string | ✅ | Name of the tool to execute (e.g. `"terminal-start"`, `"fetch_api"`) |
 | `args` | object | ❌ | Arguments to pass to the tool. Use `{}` for tools with no required parameters |
 
-**Examples:**
+#### Batch mode
+
+Chain multiple tool calls in **one** request. Each operation runs sequentially against its target server. Use this for workflows like `navigate → snapshot → evaluate` that would otherwise need N round trips.
+
+```json
+{
+  "operations": [
+    {
+      "server": "playwright-extension",
+      "tool": "browser_navigate",
+      "args": { "url": "https://example.com" }
+    },
+    {
+      "server": "playwright-extension",
+      "tool": "browser_snapshot"
+    },
+    {
+      "server": "playwright-extension",
+      "tool": "browser_evaluate",
+      "args": { "function": "() => document.body.innerText" }
+    }
+  ],
+  "stopOnError": true
+}
+```
+
+**Batch args:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `operations` | array | ✅ | Ordered list of `{ server, tool, args }` to execute sequentially |
+| `stopOnError` | boolean | ❌ | If `true` (default), stop at the first failure. If `false`, attempt every operation and report per-op status |
+
+**Batch response:**
+
+```json
+{
+  "mode": "batch",
+  "total": 3,
+  "completed": 3,
+  "stoppedOnError": false,
+  "results": [
+    { "index": 0, "server": "playwright-extension", "tool": "browser_navigate", "ok": true, "result": {...} },
+    { "index": 1, "server": "playwright-extension", "tool": "browser_snapshot", "ok": true, "result": {...} },
+    { "index": 2, "server": "playwright-extension", "tool": "browser_evaluate", "ok": true, "result": {...} }
+  ]
+}
+```
+
+**More single-mode examples:**
 
 ```json
 // List models from vision-generator
 { "server": "vision-generator", "tool": "list_models" }
 
-// Fetch a URL
-{ "server": "web-curl", "tool": "fetch_api", "args": { "url": "https://example.com", "method": "GET", "limit": 1000 } }
-
 // Start SSH terminal
 { "server": "ssh-mcp", "tool": "terminal-start", "args": { "account": "rayhan-vps" } }
 
 // Generate an image
-{ "server": "vision-generator", "tool": "generate_image", "args": { "model": "gpt-image-2", "prompt": "A cat", "output": { "directory": "C:/output" } } }
+{ "server": "vision-generator", "tool": "generate_image", "args": { "model": "gpt-image-2", "prompt": "A cat" } }
 
 // Take a screenshot
 { "server": "playwright-extension", "tool": "browser_take_screenshot", "args": { "type": "png" } }
@@ -320,7 +384,7 @@ Execute any tool on any loaded server. The response is returned **exactly as-is*
 
 ### `bridge__list_server_tools` 🔍
 
-List all available tools for a specific MCP server, including their input schemas.
+List all available tools for a specific MCP server, including their input schemas. Use this to discover what tools and parameters a server supports before calling `bridge__execute`.
 
 **Args:**
 
@@ -329,11 +393,6 @@ List all available tools for a specific MCP server, including their input schema
 | `server` | string | ✅ | Name of the MCP server to list tools for |
 
 **Output:** JSON object with server name, tool count, and array of tools with names, descriptions, and input schemas.
-
-**Use it when:**
-- you want to know what tools a server supports
-- you need to check required parameters before calling `bridge__execute`
-- you're exploring a server's capabilities
 
 ### `bridge__list_servers` 🛰️
 

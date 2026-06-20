@@ -374,6 +374,56 @@ export class ChildServerManager {
     };
   }
 
+  async executeBatch(operations, options = {}) {
+    const stopOnError = options.stopOnError !== false;
+
+    if (!Array.isArray(operations) || operations.length === 0) {
+      throw new Error('operations must be a non-empty array');
+    }
+
+    const results = [];
+    for (let index = 0; index < operations.length; index += 1) {
+      const op = operations[index];
+
+      if (!op || typeof op !== 'object' || typeof op.tool !== 'string' || op.tool.length === 0) {
+        results.push({
+          index,
+          tool: op?.tool,
+          ok: false,
+          error: 'Each operation must be an object with a non-empty "tool" string'
+        });
+        if (stopOnError) break;
+        continue;
+      }
+
+      try {
+        const result = await this.callTool(op.tool, op.args ?? {});
+        results.push({
+          index,
+          tool: op.tool,
+          ok: true,
+          result
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        results.push({
+          index,
+          tool: op.tool,
+          ok: false,
+          error: message
+        });
+        if (stopOnError) break;
+      }
+    }
+
+    return {
+      total: operations.length,
+      completed: results.length,
+      stoppedOnError: stopOnError && results.length < operations.length,
+      results
+    };
+  }
+
   async setServerDisabledFlag(serverName, disabled) {
     const configPath = this.config?.resolvedConfigPath;
     if (!configPath) {

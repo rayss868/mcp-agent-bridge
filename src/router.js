@@ -59,25 +59,43 @@ const BRIDGE_ENABLE_SERVER_TOOL = {
 const BRIDGE_EXECUTE_TOOL = {
   name: 'bridge__execute',
   description:
-    'Execute a tool on any loaded MCP server. This is the primary way to interact with MCP servers through the bridge. Pass the server name, tool name, and arguments. The response is returned exactly as-is from the child MCP server (1:1 output).',
+    'Execute a tool on any loaded MCP server. This is the primary way to interact with MCP servers through the bridge. The response is returned 1:1 from the child MCP server.\n\nSupports two modes:\n- **Single**: pass `server` + `tool` + optional `args` to run one tool call.\n- **Batch**: pass `operations` (an array of `{server, tool, args}`) to chain multiple tool calls in one request. Useful for sequences like navigate → snapshot → evaluate, which would otherwise need N separate round trips.',
   inputSchema: {
     type: 'object',
     properties: {
       server: {
         type: 'string',
-        description: 'Name of the MCP server (e.g. "ssh-mcp", "web-curl", "vision-generator").'
+        description: 'Single-mode: name of the MCP server (e.g. "ssh-mcp", "web-curl", "playwright-extension").'
       },
       tool: {
         type: 'string',
-        description: 'Name of the tool to execute on the server (e.g. "terminal-start", "fetch_api").'
+        description: 'Single-mode: name of the tool to execute on the server (e.g. "terminal-start", "fetch_api").'
       },
       args: {
         type: 'object',
-        description: 'Arguments to pass to the tool. Use {} or omit for tools with no required parameters.',
+        description: 'Single-mode: arguments to pass to the tool. Use {} or omit for tools with no required parameters.',
         additionalProperties: true
+      },
+      operations: {
+        type: 'array',
+        description: 'Batch-mode: ordered list of tool calls to execute sequentially. Each item has the same shape as the single-mode fields.',
+        items: {
+          type: 'object',
+          properties: {
+            server: { type: 'string' },
+            tool: { type: 'string' },
+            args: { type: 'object', additionalProperties: true }
+          },
+          required: ['server', 'tool'],
+          additionalProperties: false
+        },
+        minItems: 1
+      },
+      stopOnError: {
+        type: 'boolean',
+        description: 'Batch-mode: if true (default), stop at the first failure. If false, attempt every operation and report per-operation success/failure.'
       }
     },
-    required: ['server', 'tool'],
     additionalProperties: false
   }
 };
@@ -172,7 +190,10 @@ export function createGatewayServer(childServerManager) {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [...BRIDGE_META_TOOLS, ...childServerManager.getToolDefinitions()]
+    // Only expose bridge meta tools to clients. Child server tools are
+    // accessible exclusively through `bridge__execute` so the bridge
+    // stays the single point of contact (1:1 AI ↔ bridge contract).
+    tools: [...BRIDGE_META_TOOLS]
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -243,7 +264,70 @@ export function createGatewayServer(childServerManager) {
     }
 
     if (toolName === BRIDGE_EXECUTE_TOOL.name) {
-      const { server, tool, args } = request.params?.arguments ?? {};
+      const args = request.params?.arguments ?? {};
+
+      // Batch mode: { operations: [{ server, tool, args }, ...] }
+      if (args.operations !== undefined) {
+        if (!Array.isArray(args.operations) || args.operations.length === 0) {
+          throw new McpError(ErrorCode.InvalidParams, '"operations" must be a non-empty array');
+        }
+        const stopOnError = args.stopOnError !== false;
+        const results = [];
+        for (let index = 0; index < args.operations.length; index += 1) {
+          const op = args.operations[index];
+          if (!op || typeof op !== 'object' || typeof op.server !== 'string' || typeof op.tool !== 'string') {
+            results.push({
+              index,
+              ok: false,
+              error: 'Each operation must be an object with "server" and "tool" strings'
+            });
+            if (stopOnError) break;
+            continue;
+          }
+          const exposedName = `${op.server}__${op.tool}`;
+          try {
+            const result = await childServerManager.callTool(exposedName, op.args ?? {});
+            results.push({
+              index,
+              server: op.server,
+              tool: op.tool,
+              ok: true,
+              result
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            results.push({
+              index,
+              server: op.server,
+              tool: op.tool,
+              ok: false,
+              error: message
+            });
+            if (stopOnError) break;
+          }
+        }
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  mode: 'batch',
+                  total: args.operations.length,
+                  completed: results.length,
+                  stoppedOnError: stopOnError && results.length < args.operations.length,
+                  results
+                },
+                null,
+                2
+              )
+            }
+          ]
+        };
+      }
+
+      // Single mode: { server, tool, args }
+      const { server, tool } = args;
       if (!server || typeof server !== 'string') {
         throw new McpError(ErrorCode.InvalidParams, 'Missing or invalid "server" argument');
       }
@@ -253,7 +337,7 @@ export function createGatewayServer(childServerManager) {
       const exposedName = `${server}__${tool}`;
       try {
         // callTool returns the raw result from the child MCP server (1:1)
-        return await childServerManager.callTool(exposedName, args ?? {});
+        return await childServerManager.callTool(exposedName, args.args ?? {});
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return {
