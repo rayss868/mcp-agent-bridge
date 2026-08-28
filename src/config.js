@@ -87,6 +87,10 @@ export function parseCliArgs(argv) {
     if (arg === '--stdio') {
       options.stdio = true;
     }
+
+    if (arg === '--no-stdio') {
+      options.stdio = false;
+    }
   }
 
   return options;

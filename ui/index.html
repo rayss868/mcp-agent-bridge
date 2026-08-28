@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP Bridge Admin</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0f1117; color: #e1e4e8; padding: 24px; min-height: 100vh;
+  }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: #8b949e; font-size: 13px; margin-bottom: 24px; }
+  .stats { display: flex; gap: 16px; margin-bottom: 24px; }
+  .stat {
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    padding: 12px 20px; flex: 1;
+  }
+  .stat span { display: block; }
+  .stat .num { font-size: 24px; font-weight: 600; }
+  .stat .lbl { font-size: 12px; color: #8b949e; }
+  .stat .num.green { color: #3fb950; }
+  .stat .num.red { color: #f85149; }
+  .stat .num.yellow { color: #d29922; }
+
+  .card {
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    margin-bottom: 8px; overflow: hidden;
+  }
+  .card-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; cursor: pointer; user-select: none;
+  }
+  .card-header:hover { background: #1c2128; }
+  .card-left { display: flex; align-items: center; gap: 12px; }
+  .card-name { font-weight: 500; font-size: 14px; }
+  .card-status {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500;
+  }
+  .card-status.on { background: #1b3a2a; color: #3fb950; }
+  .card-status.off { background: #3a1b1b; color: #f85149; }
+  .card-tools { font-size: 12px; color: #8b949e; }
+  .card-badge { font-size: 11px; background: #21262d; padding: 2px 8px; border-radius: 10px; color: #8b949e; }
+
+  /* Toggle Switch */
+  .toggle { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle .slider {
+    position: absolute; inset: 0; background: #30363d; border-radius: 11px;
+    cursor: pointer; transition: .2s;
+  }
+  .toggle .slider::before {
+    content: ''; position: absolute; width: 16px; height: 16px; left: 3px; bottom: 3px;
+    background: #e1e4e8; border-radius: 50%; transition: .2s;
+  }
+  .toggle input:checked + .slider { background: #2ea043; }
+  .toggle input:checked + .slider::before { transform: translateX(18px); }
+  .toggle.loading .slider { opacity: .5; pointer-events: none; }
+
+  .card-body {
+    border-top: 1px solid #21262d; padding: 14px 18px; display: none;
+    font-size: 13px; color: #8b949e;
+  }
+  .card-body.open { display: block; }
+  .tool-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+  .tool-tag {
+    font-size: 11px; background: #1c2128; border: 1px solid #30363d;
+    padding: 2px 8px; border-radius: 4px;
+  }
+  .tool-tag.disabled { opacity: .4; text-decoration: line-through; }
+
+  /* Edit form */
+  .edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  .edit-field { display: flex; flex-direction: column; gap: 4px; }
+  .edit-field.full { grid-column: 1 / -1; }
+  .edit-field label { font-size: 11px; color: #8b949e; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .edit-field input, .edit-field textarea {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    color: #e1e4e8; padding: 8px 10px; font-size: 13px; font-family: inherit; outline: none;
+  }
+  .edit-field input:focus, .edit-field textarea:focus { border-color: #2ea043; }
+  .edit-field textarea { resize: vertical; min-height: 56px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .edit-field .hint { font-size: 11px; color: #6e7681; }
+
+  .env-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; margin-bottom: 6px; }
+  .env-row input { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e1e4e8; padding: 7px 10px; font-size: 13px; outline: none; }
+  .env-row input:focus { border-color: #2ea043; }
+  .env-add {
+    background: #21262d; color: #e1e4e8; border: 1px solid #30363d; border-radius: 6px;
+    padding: 6px 12px; font-size: 12px; cursor: pointer; margin-top: 2px;
+  }
+  .env-add:hover { background: #30363d; }
+  .env-del {
+    background: transparent; color: #f85149; border: 1px solid #30363d; border-radius: 6px;
+    width: 30px; cursor: pointer; font-size: 14px;
+  }
+  .env-del:hover { background: #3a1b1b; border-color: #f85149; }
+
+  .edit-actions { display: flex; gap: 10px; margin-top: 14px; align-items: center; }
+  .btn {
+    background: #21262d; color: #e1e4e8; border: 1px solid #30363d; border-radius: 6px;
+    padding: 8px 16px; font-size: 13px; font-weight: 500; cursor: pointer;
+  }
+  .btn:hover { background: #30363d; }
+  .btn.primary { background: #2ea043; border-color: #2ea043; color: #fff; }
+  .btn.primary:hover { background: #3fb950; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .edit-status { font-size: 12px; }
+
+  .toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: #2ea043; color: #fff; padding: 10px 18px; border-radius: 8px;
+    font-size: 13px; font-weight: 500; opacity: 0; transition: .3s;
+    pointer-events: none; z-index: 100;
+  }
+  .toast.show { opacity: 1; }
+  .toast.error { background: #da3633; }
+
+  .search {
+    width: 100%; padding: 10px 14px; background: #0d1117; border: 1px solid #30363d;
+    border-radius: 8px; color: #e1e4e8; font-size: 14px; margin-bottom: 16px; outline: none;
+  }
+  .search:focus { border-color: #2ea043; }
+</style>
+</head>
+<body>
+
+<h1>MCP Bridge Admin</h1>
+<p class="subtitle" id="subtitle">Loading...</p>
+
+<div class="stats">
+  <div class="stat"><span class="num green" id="stat-on">0</span><span class="lbl">Enabled</span></div>
+  <div class="stat"><span class="num red" id="stat-off">0</span><span class="lbl">Disabled</span></div>
+  <div class="stat"><span class="num yellow" id="stat-total">0</span><span class="lbl">Total Servers</span></div>
+</div>
+
+<input class="search" id="search" type="text" placeholder="Search servers..." oninput="render()">
+
+<div id="list"></div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '/api/servers';
+let servers = [];
+let openBody = null;
+
+async function load() {
+  try {
+    const res = await fetch(API);
+    const data = await res.json();
+    servers = data.servers || [];
+    document.getElementById('subtitle').textContent =
+      `Config: ${data.configPath} ${data.watching ? '• watching' : ''}`;
+  } catch {
+    servers = [];
+    document.getElementById('subtitle').textContent = 'Failed to load config';
+  }
+  render();
+}
+
+async function toggle(name) {
+  const card = document.querySelector(`[data-server="${CSS.escape(name)}"]`);
+  const toggleEl = card?.querySelector('.toggle');
+  if (toggleEl) toggleEl.classList.add('loading');
+
+  try {
+    const res = await fetch(`${API}/${encodeURIComponent(name)}/toggle`, { method: 'PATCH' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed');
+    const server = servers.find(s => s.name === name);
+    if (server) server.disabled = data.disabled;
+    render();
+    toast(data.disabled ? `${name} disabled` : `${name} enabled`);
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    if (toggleEl) toggleEl.classList.remove('loading');
+  }
+}
+
+function render() {
+  const q = (document.getElementById('search').value || '').toLowerCase();
+  const filtered = q ? servers.filter(s => s.name.toLowerCase().includes(q)) : servers;
+  const enabled = servers.filter(s => !s.disabled).length;
+  const disabled = servers.filter(s => s.disabled).length;
+
+  document.getElementById('stat-on').textContent = enabled;
+  document.getElementById('stat-off').textContent = disabled;
+  document.getElementById('stat-total').textContent = servers.length;
+
+  const list = document.getElementById('list');
+  list.innerHTML = filtered.map(s => `
+    <div class="card" data-server="${escAttr(s.name)}">
+      <div class="card-header" onclick="toggleBody(this, '${escAttr(s.name)}')">
+        <div class="card-left">
+          <label class="toggle" onclick="event.stopPropagation()">
+            <input type="checkbox" ${s.disabled ? '' : 'checked'} onchange="toggle('${escAttr(s.name)}')">
+            <span class="slider"></span>
+          </label>
+          <span class="card-name">${esc(s.name)}</span>
+          <span class="card-status ${s.disabled ? 'off' : 'on'}">${s.disabled ? 'off' : 'on'}</span>
+        </div>
+        <span class="card-badge">${s.toolCount} tools</span>
+      </div>
+      <div class="card-body">
+        <div><strong>Command:</strong> <code>${esc(s.command || '-')}</code></div>
+        ${s.args ? `<div><strong>Args:</strong> <code>${esc(JSON.stringify(s.args))}</code></div>` : ''}
+        ${s.tools ? `
+          <div class="tool-list">
+            ${s.tools.map(t => `<span class="tool-tag">${esc(t)}</span>`).join('')}
+          </div>
+        ` : ''}
+        <div class="edit-grid" id="edit-grid-${escAttr(s.name)}"></div>
+        <div class="edit-actions">
+          <button class="btn primary" onclick="saveServer('${escAttr(s.name)}')">Save</button>
+          <span class="edit-status" id="status-${escAttr(s.name)}"></span>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  // Preserve the previously open body and rebuild its edit form
+  if (openBody) {
+    const openCard = document.querySelector(`[data-server="${CSS.escape(openBody.name)}"]`);
+    if (openCard) {
+      const body = openCard.querySelector('.card-body');
+      if (body) {
+        body.classList.add('open');
+        buildEditForm(openCard, openBody);
+      }
+    }
+  }
+}
+
+function toggleBody(header, name) {
+  const body = header.nextElementSibling;
+  if (body.classList.contains('open')) {
+    body.classList.remove('open');
+    if (openBody && openBody.name === name) openBody = null;
+    return;
+  }
+  // Close any other open body
+  document.querySelectorAll('.card-body.open').forEach(b => b.classList.remove('open'));
+  const server = servers.find(s => s.name === name);
+  openBody = server || null;
+  if (openBody) buildEditForm(header.parentElement, openBody);
+  body.classList.add('open');
+}
+
+function buildEditForm(card, server) {
+  const grid = card.querySelector('.edit-grid');
+  const envObj = server.env && typeof server.env === 'object' ? server.env : {};
+
+  const envRows = Object.entries(envObj).map(([k, v]) => envRowHtml(k, v)).join('');
+  const argsStr = (server.args || []).join('\n');
+  const disabledToolsStr = (server.disabledTools || []).join(', ');
+
+  grid.innerHTML = `
+    <div class="edit-field">
+      <label>Command</label>
+      <input id="f-cmd" value="${escAttr(server.command || '')}" placeholder="node">
+    </div>
+    <div class="edit-field">
+      <label>Timeout (seconds)</label>
+      <input id="f-timeout" type="number" min="1" value="${server.timeout ?? ''}" placeholder="e.g. 60">
+    </div>
+    <div class="edit-field">
+      <label>Args</label>
+      <textarea id="f-args" placeholder="One argument per line">${esc(escText(argsStr))}</textarea>
+      <span class="hint">One argument per line (preserves order)</span>
+    </div>
+    <div class="edit-field">
+      <label>CWD</label>
+      <input id="f-cwd" value="${escAttr(server.cwd || '')}" placeholder="Working directory (optional)">
+    </div>
+    <div class="edit-field full">
+      <label>Environment variables</label>
+      <div id="env-list">${envRows || ''}</div>
+      <button class="env-add" type="button" onclick="addEnvRow()">+ Add env var</button>
+    </div>
+    <div class="edit-field full">
+      <label>Disabled tools</label>
+      <input id="f-dtools" value="${escAttr(disabledToolsStr)}" placeholder="tool1, tool2 (comma separated)">
+      <span class="hint">Comma separated tool names to hide from this server</span>
+    </div>
+  `;
+}
+
+function envRowHtml(k, v) {
+  return `
+    <div class="env-row">
+      <input class="env-key" value="${escAttr(k)}" placeholder="KEY">
+      <input class="env-val" value="${escAttr(v)}" placeholder="value">
+      <button class="env-del" type="button" onclick="this.parentElement.remove()">×</button>
+    </div>
+  `;
+}
+
+function addEnvRow() {
+  const list = document.getElementById('env-list');
+  if (!list) return;
+  const row = document.createElement('div');
+  row.className = 'env-row';
+  row.innerHTML = `
+    <input class="env-key" placeholder="KEY">
+    <input class="env-val" placeholder="value">
+    <button class="env-del" type="button" onclick="this.parentElement.remove()">×</button>
+  `;
+  list.appendChild(row);
+}
+
+function collectServerData(server) {
+  const card = document.querySelector(`[data-server="${CSS.escape(server.name)}"]`);
+  const val = id => card?.querySelector(id)?.value ?? '';
+
+  const args = val('#f-args').split('\n').map(s => s.trim()).filter(Boolean);
+  const env = {};
+  card?.querySelectorAll('.env-row').forEach(row => {
+    const k = row.querySelector('.env-key')?.value.trim();
+    const v = row.querySelector('.env-val')?.value;
+    if (k) env[k] = v;
+  });
+
+  const data = {
+    command: val('#f-cmd'),
+    args,
+    cwd: val('#f-cwd'),
+    env: Object.keys(env).length > 0 ? env : null,
+    timeout: val('#f-timeout') ? Number(val('#f-timeout')) : null,
+    disabledTools: val('#f-dtools').split(',').map(s => s.trim()).filter(Boolean)
+  };
+
+  // Send null only for fields the user explicitly cleared; keep existing values otherwise
+  const patch = {};
+  if (data.command !== server.command) patch.command = data.command;
+  if (JSON.stringify(data.args) !== JSON.stringify(server.args || [])) patch.args = data.args;
+  if ((data.cwd || null) !== (server.cwd || null)) patch.cwd = data.cwd || null;
+  if (JSON.stringify(data.env) !== JSON.stringify(server.env || {})) patch.env = data.env;
+  if ((data.timeout ?? null) !== (server.timeout ?? null)) patch.timeout = data.timeout;
+  if (JSON.stringify(data.disabledTools) !== JSON.stringify(server.disabledTools || [])) patch.disabledTools = data.disabledTools;
+
+  return patch;
+}
+
+async function saveServer(name) {
+  const server = servers.find(s => s.name === name);
+  if (!server) return;
+  const card = document.querySelector(`[data-server="${CSS.escape(name)}"]`);
+  const statusEl = card?.querySelector('.edit-status');
+  const btn = card?.querySelector('.btn.primary');
+  if (!btn || !statusEl) return;
+
+  const patch = collectServerData(server);
+  if (Object.keys(patch).length === 0) {
+    statusEl.textContent = 'No changes';
+    return;
+  }
+
+  btn.disabled = true;
+  statusEl.textContent = 'Saving...';
+  statusEl.style.color = '#d29922';
+
+  try {
+    const res = await fetch(`${API}/${encodeURIComponent(name)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Save failed');
+
+    // Merge returned values back into local state
+    const idx = servers.findIndex(s => s.name === name);
+    servers[idx] = Object.assign({}, servers[idx], data);
+    openBody = servers[idx];
+
+    statusEl.textContent = 'Saved ✓';
+    statusEl.style.color = '#3fb950';
+    toast(`Saved ${name} — hot reload applies within ~500ms`);
+    setTimeout(() => { statusEl.textContent = ''; }, 3000);
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.style.color = '#f85149';
+    toast(err.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+function escAttr(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/'/g, '&#39;');
+}
+function escText(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+let toastTimer;
+function toast(msg, isError) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show' + (isError ? ' error' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+load();
+setInterval(load, 10000);
+</script>
+</body>
+</html>

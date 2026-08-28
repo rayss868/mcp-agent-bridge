@@ -1,6 +1,9 @@
 import process from 'node:process';
 import { watch } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
@@ -8,6 +11,8 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { loadGatewayConfig, parseCliArgs } from './config.js';
 import { ChildServerManager } from './childServers.js';
 import { createGatewayServer } from './router.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function sendJson(res, status, body) {
   res.status(status).json(body);
@@ -167,6 +172,7 @@ async function main() {
       activeServers.add(server);
       transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
+        enableJsonResponse: true,
         onsessioninitialized: (newSessionId) => {
           transports[newSessionId] = transport;
         }
@@ -223,6 +229,174 @@ async function main() {
       if (!res.headersSent) {
         res.status(500).send('Error processing session termination');
       }
+    }
+  });
+
+  // ── Admin UI routes ──────────────────────────────────────────
+  const uiDir = path.resolve(__dirname, '..', 'ui');
+
+  app.get(['/', '/ui'], async (_req, res) => {
+    try {
+      const html = await readFile(path.join(uiDir, 'index.html'), 'utf8');
+      res.type('html').send(html);
+    } catch {
+      res.status(404).send('UI not found');
+    }
+  });
+
+  app.get('/api/servers', async (_req, res) => {
+    try {
+      const raw = await readFile(gatewayConfig.resolvedConfigPath, 'utf8');
+      const parsed = JSON.parse(raw);
+      const entries = parsed?.mcpServers ?? {};
+      const running = childServerManager.getStartupSummary().loadedServers;
+      const runningMap = {};
+      for (const s of running) runningMap[s.serverName] = s.toolCount;
+
+      const servers = Object.entries(entries).map(([name, cfg]) => ({
+        name,
+        disabled: cfg.disabled === true,
+        command: cfg.command,
+        args: cfg.args,
+        cwd: cfg.cwd ?? null,
+        env: cfg.env ?? null,
+        timeout: cfg.timeout ?? null,
+        disabledTools: cfg.disabledTools ?? null,
+        toolCount: runningMap[name] ?? 0,
+        tools: (childServerManager.getToolsForServer(name) ?? []).map(t => t.name)
+      }));
+
+      res.json({ configPath: gatewayConfig.resolvedConfigPath, servers });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.patch('/api/servers/:name/toggle', async (req, res) => {
+    try {
+      const serverName = req.params.name;
+      const raw = await readFile(gatewayConfig.resolvedConfigPath, 'utf8');
+      const parsed = JSON.parse(raw);
+      const entry = parsed?.mcpServers?.[serverName];
+      if (!entry) {
+        res.status(404).json({ error: `Server "${serverName}" not found` });
+        return;
+      }
+
+      const current = entry.disabled === true;
+      entry.disabled = !current;
+      if (entry.disabled === false) delete entry.disabled;
+
+      await writeFile(gatewayConfig.resolvedConfigPath, JSON.stringify(parsed, null, 2) + '\n', 'utf8');
+      res.json({ server: serverName, disabled: entry.disabled === true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Full server config update
+  app.patch('/api/servers/:name', async (req, res) => {
+    try {
+      const serverName = req.params.name;
+      const raw = await readFile(gatewayConfig.resolvedConfigPath, 'utf8');
+      const parsed = JSON.parse(raw);
+      const entry = parsed?.mcpServers?.[serverName];
+      if (!entry) {
+        res.status(404).json({ error: `Server "${serverName}" not found` });
+        return;
+      }
+
+      const body = req.body ?? {};
+
+      if (body.command !== undefined) {
+        if (typeof body.command !== 'string' || !body.command.trim()) {
+          res.status(400).json({ error: '"command" must be a non-empty string' });
+          return;
+        }
+        entry.command = body.command.trim();
+      }
+
+      if (body.args !== undefined) {
+        if (!Array.isArray(body.args)) {
+          res.status(400).json({ error: '"args" must be an array of strings' });
+          return;
+        }
+        entry.args = body.args.map(v => String(v));
+      }
+
+      if (body.cwd !== undefined) {
+        if (body.cwd === null || body.cwd === '') {
+          delete entry.cwd;
+        } else {
+          entry.cwd = String(body.cwd);
+        }
+      }
+
+      if (body.env !== undefined) {
+        if (body.env === null || (typeof body.env === 'object' && Object.keys(body.env).length === 0)) {
+          delete entry.env;
+        } else if (typeof body.env === 'object') {
+          entry.env = {};
+          for (const [k, v] of Object.entries(body.env)) {
+            entry.env[String(k)] = String(v);
+          }
+        } else {
+          res.status(400).json({ error: '"env" must be an object of key-value pairs' });
+          return;
+        }
+      }
+
+      if (body.timeout !== undefined) {
+        if (body.timeout === null || body.timeout === '') {
+          delete entry.timeout;
+        } else {
+          const t = Number(body.timeout);
+          if (!Number.isFinite(t) || t <= 0) {
+            res.status(400).json({ error: '"timeout" must be a positive number (seconds)' });
+            return;
+          }
+          entry.timeout = t;
+        }
+      }
+
+      if (body.disabledTools !== undefined) {
+        if (!Array.isArray(body.disabledTools)) {
+          res.status(400).json({ error: '"disabledTools" must be an array of strings' });
+          return;
+        }
+        if (body.disabledTools.length === 0) {
+          delete entry.disabledTools;
+        } else {
+          entry.disabledTools = body.disabledTools.map(v => String(v));
+        }
+      }
+
+      if (body.disabled !== undefined) {
+        if (body.disabled) {
+          entry.disabled = true;
+        } else {
+          delete entry.disabled;
+        }
+      }
+
+      await writeFile(gatewayConfig.resolvedConfigPath, JSON.stringify(parsed, null, 2) + '\n', 'utf8');
+
+      const running = childServerManager.getStartupSummary().loadedServers;
+      const toolCount = running.find(s => s.serverName === serverName)?.toolCount ?? 0;
+
+      res.json({
+        server: serverName,
+        disabled: entry.disabled === true,
+        command: entry.command,
+        args: entry.args,
+        cwd: entry.cwd ?? null,
+        env: entry.env ?? null,
+        timeout: entry.timeout ?? null,
+        disabledTools: entry.disabledTools ?? [],
+        toolCount
+      });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
     }
   });
 
