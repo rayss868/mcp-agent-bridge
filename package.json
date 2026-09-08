@@ -1,9 +1,10 @@
 {
   "name": "mcp-agent-bridge",
-  "version": "0.1.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node --test test/*.test.js",
     "start": "node src/index.js --config config/vision-web.json --host 127.0.0.1 --port 8787",
     "dev": "node src/index.js --config config/default.json --host 127.0.0.1 --port 8787",
     "stdio": "node src/index.js",

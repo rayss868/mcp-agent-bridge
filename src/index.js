@@ -11,11 +11,68 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { loadGatewayConfig, parseCliArgs } from './config.js';
 import { ChildServerManager } from './childServers.js';
 import { createGatewayServer } from './router.js';
+import { createSessionRegistry } from './mcpSessions.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function sendJson(res, status, body) {
   res.status(status).json(body);
+}
+
+// Keeps long-running SSE responses alive through Cloudflare Tunnel.
+// Cloudflare drops streams that stay idle (~100s). For MCP streaming
+// responses we periodically write an SSE comment frame so the origin
+// never looks idle to the proxy. Only active for SSE, never JSON.
+const SSE_KEEPALIVE_INTERVAL_MS = 15 * 1000;
+
+function sseKeepaliveMiddleware(req, res, next) {
+  const originalWrite = res.write.bind(res);
+  const originalWriteHead = res.writeHead.bind(res);
+  let lastWriteAt = 0;
+  let timer = null;
+
+  // A stream is SSE and open once headers have been sent with an
+  // event-stream content type.
+  const isSseResponse = () => String(res.getHeader('content-type') || '').includes('text/event-stream');
+
+  const stop = () => {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  };
+
+  let started = false;
+  const maybeStart = () => {
+    if (started || !isSseResponse()) return;
+    started = true;
+    lastWriteAt = Date.now();
+    timer = setInterval(() => {
+      if (Date.now() - lastWriteAt >= SSE_KEEPALIVE_INTERVAL_MS) {
+        originalWrite(': keepalive\n\n');
+      }
+    }, SSE_KEEPALIVE_INTERVAL_MS);
+    if (timer.unref) timer.unref();
+  };
+
+  res.write = (chunk, ...args) => {
+    lastWriteAt = Date.now();
+    // Safety net: start keepalive on the first body chunk if writeHead
+    // didn't already trigger it.
+    maybeStart();
+    return originalWrite(chunk, ...args);
+  };
+
+  res.writeHead = (...args) => {
+    const result = originalWriteHead(...args);
+    maybeStart();
+    return result;
+  };
+
+  res.on('finish', stop);
+  res.on('close', stop);
+
+  next();
 }
 
 function startConfigWatcher(configPath, onlyValue, manager) {
@@ -101,7 +158,7 @@ async function main() {
   }
 
   const app = createMcpExpressApp({ host: '0.0.0.0' });
-  const transports = {};
+  const sessions = createSessionRegistry({ ttlMs: 30 * 60 * 1000 });
 
   app.get('/health', (_req, res) => {
     sendJson(res, 200, {
@@ -133,11 +190,13 @@ async function main() {
     });
   });
 
+  app.use('/mcp', sseKeepaliveMiddleware);
+
   app.post('/mcp', async (req, res) => {
     const sessionId = req.headers['mcp-session-id'];
 
     try {
-      let transport = sessionId ? transports[sessionId] : undefined;
+      let transport = sessionId ? sessions.get(sessionId) : undefined;
 
       if (transport) {
         await transport.handleRequest(req, res, req.body);
@@ -145,11 +204,11 @@ async function main() {
       }
 
       if (sessionId) {
-        sendJson(res, 400, {
+        sendJson(res, 404, {
           jsonrpc: '2.0',
           error: {
             code: -32000,
-            message: 'Bad Request: Invalid session ID'
+            message: 'Session not found'
           },
           id: null
         });
@@ -174,21 +233,28 @@ async function main() {
         sessionIdGenerator: () => randomUUID(),
         enableJsonResponse: true,
         onsessioninitialized: (newSessionId) => {
-          transports[newSessionId] = transport;
+          sessions.set(newSessionId, transport);
         }
       });
 
       transport.onclose = async () => {
         const closingSessionId = transport.sessionId;
-        if (closingSessionId && transports[closingSessionId]) {
-          delete transports[closingSessionId];
+        if (closingSessionId && sessions.get(closingSessionId) === transport) {
+          sessions.remove(closingSessionId);
         }
         activeServers.delete(server);
         await server.close().catch(() => {});
       };
 
-      await server.connect(transport);
-      await transport.handleRequest(req, res, req.body);
+      try {
+        await server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
+      } catch (error) {
+        await transport.close().catch(() => {});
+        activeServers.delete(server);
+        await server.close().catch(() => {});
+        throw error;
+      }
     } catch (error) {
       console.error('Error handling MCP request:', error);
 
@@ -207,23 +273,32 @@ async function main() {
 
   app.get('/mcp', async (req, res) => {
     const sessionId = req.headers['mcp-session-id'];
-    if (!sessionId || !transports[sessionId]) {
-      res.status(400).send('Invalid or missing session ID');
-      return;
-    }
-
-    await transports[sessionId].handleRequest(req, res);
-  });
-
-  app.delete('/mcp', async (req, res) => {
-    const sessionId = req.headers['mcp-session-id'];
-    if (!sessionId || !transports[sessionId]) {
-      res.status(400).send('Invalid or missing session ID');
+    const transport = sessionId ? sessions.get(sessionId) : undefined;
+    if (!transport) {
+      res.status(404).send('Session not found');
       return;
     }
 
     try {
-      await transports[sessionId].handleRequest(req, res);
+      await transport.handleRequest(req, res);
+    } catch (error) {
+      console.error('Error handling MCP stream:', error);
+      if (!res.headersSent) {
+        res.status(500).send('Error processing MCP stream');
+      }
+    }
+  });
+
+  app.delete('/mcp', async (req, res) => {
+    const sessionId = req.headers['mcp-session-id'];
+    const transport = sessionId ? sessions.get(sessionId) : undefined;
+    if (!transport) {
+      res.status(404).send('Session not found');
+      return;
+    }
+
+    try {
+      await transport.handleRequest(req, res);
     } catch (error) {
       console.error('Error handling session termination:', error);
       if (!res.headersSent) {
@@ -417,12 +492,8 @@ async function main() {
 
   const shutdown = async () => {
     stopWatcher();
-    serverInstance.close();
-    await Promise.allSettled(
-      Object.values(transports).map(async (transport) => {
-        await transport.close();
-      })
-    );
+    await new Promise((resolve) => serverInstance.close(resolve));
+    await sessions.close();
     for (const server of activeServers) {
       await server.close().catch(() => {});
     }

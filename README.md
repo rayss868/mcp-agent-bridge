@@ -16,6 +16,13 @@
 
 ---
 
+## ✨ What's new in v0.3.1
+
+- Added MCP session lifecycle cleanup with a 30-minute inactivity TTL.
+- Invalid or expired `/mcp` sessions now return `404 Session not found`.
+- Failed session initialization and graceful shutdown now close active transports and gateway servers.
+- Added `npm test` for the bridge lifecycle regression suite.
+
 ## ✨ What's new in v0.3.0
 
 ```mermaid
@@ -856,7 +863,7 @@ Primary MCP Streamable HTTP endpoint. Exposes the merged tool list (child server
 
 ### `GET /mcp`
 
-Used for session-based MCP flows.
+Used for session-based MCP flows. Sessions expire after 30 minutes of inactivity; accessing a session refreshes its inactivity timer. Unknown or expired sessions return `404 Session not found`.
 
 ### `DELETE /mcp`
 
