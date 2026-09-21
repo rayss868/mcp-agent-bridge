@@ -59,26 +59,26 @@ const BRIDGE_ENABLE_SERVER_TOOL = {
 const BRIDGE_EXECUTE_TOOL = {
   name: 'bridge__execute',
   description:
-    'Execute a tool on any loaded MCP server. This is the primary way to interact with MCP servers through the bridge. The response is returned 1:1 from the child MCP server.\n\nSupports two modes:\n- **Single**: pass `server` + `tool` + optional `args` to run one tool call.\n- **Batch**: pass `operations` (an array of `{server, tool, args}`) to chain multiple tool calls in one request. Useful for sequences like navigate → snapshot → evaluate, which would otherwise need N separate round trips.',
+    'Execute a tool on any loaded MCP server. Response is returned 1:1 from the child server.\nSingle mode: pass server + tool + args. Batch mode: pass operations array of {server, tool, args}.',
   inputSchema: {
     type: 'object',
     properties: {
       server: {
         type: 'string',
-        description: 'Single-mode: name of the MCP server (e.g. "ssh-mcp", "web-curl", "playwright-extension").'
+        description: 'Single-mode: MCP server name.'
       },
       tool: {
         type: 'string',
-        description: 'Single-mode: name of the tool to execute on the server (e.g. "terminal-start", "fetch_api").'
+        description: 'Single-mode: tool name on the server.'
       },
       args: {
         type: 'object',
-        description: 'Single-mode: arguments to pass to the tool. Use {} or omit for tools with no required parameters.',
+        description: 'Single-mode: tool arguments.',
         additionalProperties: true
       },
       operations: {
         type: 'array',
-        description: 'Batch-mode: ordered list of tool calls to execute sequentially. Each item has the same shape as the single-mode fields.',
+        description: 'Batch-mode: sequential tool calls [{server, tool, args}].',
         items: {
           type: 'object',
           properties: {
@@ -93,7 +93,7 @@ const BRIDGE_EXECUTE_TOOL = {
       },
       stopOnError: {
         type: 'boolean',
-        description: 'Batch-mode: if true (default), stop at the first failure. If false, attempt every operation and report per-operation success/failure.'
+        description: 'Batch-mode: stop at first failure (default true).'
       }
     },
     additionalProperties: false
@@ -175,6 +175,12 @@ function buildBridgeOverview(childServerManager, filter) {
 }
 
 export function createGatewayServer(childServerManager) {
+  let cachedToolsResponse = null;
+
+  function invalidateToolsCache() {
+    cachedToolsResponse = null;
+  }
+
   const server = new Server(
     {
       name: 'mcp-agent-bridge-gateway',
@@ -189,12 +195,12 @@ export function createGatewayServer(childServerManager) {
     }
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    // Only expose bridge meta tools to clients. Child server tools are
-    // accessible exclusively through `bridge__execute` so the bridge
-    // stays the single point of contact (1:1 AI ↔ bridge contract).
-    tools: [...BRIDGE_META_TOOLS]
-  }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    if (!cachedToolsResponse) {
+      cachedToolsResponse = { tools: [...BRIDGE_META_TOOLS] };
+    }
+    return cachedToolsResponse;
+  });
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const toolName = request.params?.name;
@@ -222,6 +228,8 @@ export function createGatewayServer(childServerManager) {
       }
       try {
         const result = await childServerManager.disableServer(serverName);
+        invalidateToolsCache();
+        server.sendToolListChanged();
         return {
           content: [
             {
@@ -246,6 +254,8 @@ export function createGatewayServer(childServerManager) {
       }
       try {
         const result = await childServerManager.enableServer(serverName);
+        invalidateToolsCache();
+        server.sendToolListChanged();
         return {
           content: [
             {
@@ -310,17 +320,13 @@ export function createGatewayServer(childServerManager) {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(
-                {
+              text: JSON.stringify({
                   mode: 'batch',
                   total: args.operations.length,
                   completed: results.length,
                   stoppedOnError: stopOnError && results.length < args.operations.length,
                   results
-                },
-                null,
-                2
-              )
+                })
             }
           ]
         };
@@ -407,5 +413,5 @@ export function createGatewayServer(childServerManager) {
     }
   });
 
-  return server;
+  return { server, invalidateToolsCache };
 }

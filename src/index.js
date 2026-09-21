@@ -2,6 +2,7 @@ import process from 'node:process';
 import { watch } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
+import { createGzip } from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -23,7 +24,44 @@ function sendJson(res, status, body) {
 // Cloudflare drops streams that stay idle (~100s). For MCP streaming
 // responses we periodically write an SSE comment frame so the origin
 // never looks idle to the proxy. Only active for SSE, never JSON.
-const SSE_KEEPALIVE_INTERVAL_MS = 15 * 1000;
+const SSE_KEEPALIVE_INTERVAL_MS = 10 * 1000;
+
+// ── Response compression ───────────────────────────────────────
+// Compresses JSON responses with gzip to reduce tunnel transfer size.
+// Skips if client doesn't accept gzip, response is <256B, or already handled.
+function compressionMiddleware(req, res, next) {
+  const originalJson = res.json.bind(res);
+
+  res.json = (body) => {
+    const accept = req.get('accept-encoding') || '';
+    if (!accept.includes('gzip')) {
+      return originalJson(body);
+    }
+
+    const payload = JSON.stringify(body);
+    if (payload.length < 256) {
+      return originalJson(body);
+    }
+
+    // Remove default content-length so we can set compressed size later
+    res.removeHeader('content-length');
+    res.set('content-encoding', 'gzip');
+    res.set('vary', 'Accept-Encoding');
+
+    const gzip = createGzip({ level: 6 });
+    const chunks = [];
+    gzip.on('data', (chunk) => chunks.push(chunk));
+    gzip.on('end', () => {
+      const compressed = Buffer.concat(chunks);
+      res.set('content-length', String(compressed.length));
+      res.status(200).end(compressed);
+    });
+    gzip.end(Buffer.from(payload));
+    return res;
+  };
+
+  next();
+}
 
 function sseKeepaliveMiddleware(req, res, next) {
   const originalWrite = res.write.bind(res);
@@ -75,7 +113,7 @@ function sseKeepaliveMiddleware(req, res, next) {
   next();
 }
 
-function startConfigWatcher(configPath, onlyValue, manager) {
+function startConfigWatcher(configPath, onlyValue, manager, onReload) {
   let debounceTimer = null;
   let closed = false;
 
@@ -84,6 +122,7 @@ function startConfigWatcher(configPath, onlyValue, manager) {
     try {
       const fresh = await loadGatewayConfig(configPath, onlyValue);
       await manager.reloadFromConfig(fresh);
+      onReload?.();
     } catch (error) {
       console.error(`[mcp-agent-bridge] reload failed: ${error.message}`);
     }
@@ -131,9 +170,9 @@ async function main() {
   await childServerManager.start();
 
   if (options.stdio) {
-    const stopWatcher = startConfigWatcher(gatewayConfig.resolvedConfigPath, options.only, childServerManager);
+    const stopWatcher = startConfigWatcher(gatewayConfig.resolvedConfigPath, options.only, childServerManager, invalidateToolsCache);
 
-    const server = createGatewayServer(childServerManager);
+    const { server, invalidateToolsCache } = createGatewayServer(childServerManager);
     activeServers.add(server);
     const transport = new StdioServerTransport();
 
@@ -158,6 +197,7 @@ async function main() {
   }
 
   const app = createMcpExpressApp({ host: '0.0.0.0' });
+  app.use(compressionMiddleware);
   const sessions = createSessionRegistry({ ttlMs: 30 * 60 * 1000 });
 
   app.get('/health', (_req, res) => {
@@ -227,7 +267,7 @@ async function main() {
         return;
       }
 
-      const server = createGatewayServer(childServerManager);
+      const { server } = createGatewayServer(childServerManager);
       activeServers.add(server);
       transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
@@ -237,13 +277,12 @@ async function main() {
         }
       });
 
-      transport.onclose = async () => {
+      transport.onclose = () => {
         const closingSessionId = transport.sessionId;
         if (closingSessionId && sessions.get(closingSessionId) === transport) {
           sessions.remove(closingSessionId);
         }
         activeServers.delete(server);
-        await server.close().catch(() => {});
       };
 
       try {
@@ -475,7 +514,11 @@ async function main() {
     }
   });
 
-  const stopWatcher = startConfigWatcher(gatewayConfig.resolvedConfigPath, options.only, childServerManager);
+  const stopWatcher = startConfigWatcher(gatewayConfig.resolvedConfigPath, options.only, childServerManager, () => {
+    for (const server of activeServers) {
+      server.sendToolListChanged?.();
+    }
+  });
 
   const serverInstance = app.listen(options.port, options.host, (error) => {
     if (error) {

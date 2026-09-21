@@ -16,6 +16,34 @@
 
 ---
 
+## ✨ What's new in v0.3.2
+
+### Performance: Cloudflare Tunnel latency fix
+
+**Problem:** ChatGPT accessing MCP Bridge through Cloudflare Tunnel experiences significant latency.
+
+**Root causes identified:**
+- Tunnel running on HTTP/1.1 instead of HTTP/2 (no multiplexing)
+- No response compression — large JSON payloads sent uncompressed through tunnel
+- Tools list rebuilt on every `tools/list` request even when unchanged
+- Bridge meta tool descriptions excessively verbose (~400 words for `bridge__execute`)
+- Batch response JSON pretty-printed (`JSON.stringify(..., null, 2)`) adding unnecessary whitespace
+- SSE keepalive interval (15s) not aggressive enough for Cloudflare's idle timeout
+
+**Changes applied:**
+
+| Area | Before | After |
+|------|--------|-------|
+| Tunnel protocol | HTTP/1.1 | HTTP/2 (`--protocol http2`) |
+| Response compression | None | gzip level 6 for JSON >256B |
+| Tools list caching | Rebuilt every call | Cached, invalidated on config change |
+| `bridge__execute` description | ~400 words | ~40 words |
+| Batch response | Pretty-printed | Compact JSON |
+| SSE keepalive | 15s | 10s |
+| Config reload | No client notification | `sendToolListChanged` broadcast |
+
+---
+
 ## ✨ What's new in v0.3.1
 
 - Added MCP session lifecycle cleanup with a 30-minute inactivity TTL.
