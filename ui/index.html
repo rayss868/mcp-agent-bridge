@@ -122,6 +122,68 @@
     border-radius: 8px; color: #e1e4e8; font-size: 14px; margin-bottom: 16px; outline: none;
   }
   .search:focus { border-color: #2ea043; }
+
+  /* Tunnel Panel */
+  .tunnel-card {
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    padding: 18px; margin-bottom: 24px;
+  }
+  .tunnel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .tunnel-card h2 { font-size: 15px; font-weight: 600; }
+  .tunnel-desc { color: #8b949e; font-size: 12px; margin-bottom: 16px; }
+  .tunnel-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 12px; }
+  .tunnel-field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 200px; }
+  .tunnel-field label { font-size: 11px; color: #8b949e; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .tunnel-field input, .tunnel-field select {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    color: #e1e4e8; padding: 8px 10px; font-size: 13px; font-family: inherit; outline: none;
+  }
+  .tunnel-field input:focus, .tunnel-field select:focus { border-color: #2ea043; }
+  .tunnel-actions { display: flex; gap: 8px; align-items: center; }
+  .btn-tunnel {
+    border: 1px solid #30363d; background: #21262d; color: #e1e4e8;
+    padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer;
+  }
+  .btn-tunnel:hover { background: #30363d; }
+  .btn-tunnel.start { background: #1b3a2a; border-color: #2ea043; color: #3fb950; }
+  .btn-tunnel.start:hover { background: #234a35; }
+  .btn-tunnel.stop { background: #3a1b1b; border-color: #da3633; color: #f85149; }
+  .btn-tunnel.stop:hover { background: #4a2222; }
+  .btn-tunnel:disabled { opacity: .5; cursor: not-allowed; }
+  .tunnel-status-pill {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500;
+    background: #21262d; color: #8b949e;
+  }
+  .tunnel-status-pill.on { background: #1b3a2a; color: #3fb950; }
+  .tunnel-status-pill.off { background: #3a1b1b; color: #f85149; }
+  .tunnel-status-pill.on::before { content: '● '; }
+  .tunnel-status-pill.off::before { content: '● '; }
+  .tunnel-status-pill.checking { background: #21262d; color: #d29922; }
+  .tunnel-status-pill.checking::before { content: '● '; }
+  .tunnel-url-box {
+    display: flex; align-items: center; gap: 8px;
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 8px 12px; font-family: Consolas, 'Courier New', monospace; font-size: 13px;
+    margin-bottom: 8px;
+  }
+  .tunnel-url-box .url-text { flex: 1; color: #58a6ff; word-break: break-all; }
+  .tunnel-url-box .url-label { color: #8b949e; font-size: 11px; flex-shrink: 0; font-family: inherit; }
+  .btn-copy {
+    background: #21262d; color: #e1e4e8; border: 1px solid #30363d; border-radius: 6px;
+    padding: 4px 10px; font-size: 12px; cursor: pointer; flex-shrink: 0;
+  }
+  .btn-copy:hover { background: #30363d; }
+  .tunnel-error {
+    background: #3a1b1b; border: 1px solid #da3633; color: #f85149;
+    border-radius: 6px; padding: 8px 12px; font-size: 12px; margin-top: 8px;
+    display: none; word-break: break-word;
+  }
+  .tunnel-hint { color: #8b949e; font-size: 11px; margin-top: 8px; }
+  .tunnel-setup { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .tunnel-setup p { color: #8b949e; font-size: 12px; }
+  .tunnel-advanced { margin-top: 14px; border-top: 1px solid #30363d; padding-top: 12px; }
+  .tunnel-advanced summary { color: #8b949e; font-size: 12px; cursor: pointer; }
+  .tunnel-advanced[open] summary { margin-bottom: 12px; }
 </style>
 </head>
 <body>
@@ -133,6 +195,67 @@
   <div class="stat"><span class="num green" id="stat-on">0</span><span class="lbl">Enabled</span></div>
   <div class="stat"><span class="num red" id="stat-off">0</span><span class="lbl">Disabled</span></div>
   <div class="stat"><span class="num yellow" id="stat-total">0</span><span class="lbl">Total Servers</span></div>
+</div>
+
+<div class="tunnel-card">
+  <div class="tunnel-head">
+    <h2>Tunnel untuk ChatGPT</h2>
+    <span class="tunnel-status-pill checking" id="tunnel-pill">Memeriksa...</span>
+  </div>
+  <p class="tunnel-desc">Buat koneksi publik agar ChatGPT bisa mengakses MCP Bridge. Tidak perlu akun untuk Quick Tunnel.</p>
+
+  <div class="tunnel-setup">
+    <p id="tunnel-simple-help">Klik Mulai Tunnel. URL ChatGPT akan muncul setelah koneksi siap.</p>
+    <div class="tunnel-actions">
+      <button class="btn-tunnel start" id="btn-tunnel-start">Mulai Tunnel</button>
+      <button class="btn-tunnel stop" id="btn-tunnel-stop">Hentikan</button>
+    </div>
+  </div>
+
+  <div class="tunnel-url-box" id="box-tunnel-url" style="display:none;">
+    <span class="url-label">URL Publik</span>
+    <span class="url-text" id="tunnel-url">-</span>
+    <button class="btn-copy" onclick="copyTunnelUrl('tunnel-url', this)">Salin</button>
+  </div>
+  <div class="tunnel-url-box" id="box-connector-url" style="display:none;">
+    <span class="url-label">URL untuk ChatGPT</span>
+    <span class="url-text" id="connector-url">-</span>
+    <button class="btn-copy" onclick="copyTunnelUrl('connector-url', this)">Salin</button>
+  </div>
+  <div class="tunnel-error" id="tunnel-error"></div>
+
+  <details class="tunnel-advanced">
+    <summary>Pengaturan lanjutan</summary>
+    <div class="tunnel-row">
+      <div class="tunnel-field">
+        <label for="tunnel-provider">Metode koneksi</label>
+        <select id="tunnel-provider">
+          <option value="cloudflared-quick">Cloudflare Quick Tunnel (tanpa akun, URL acak)</option>
+          <option value="cloudflared-named">Cloudflare Named Tunnel (token)</option>
+          <option value="ngrok">ngrok Reserved Domain</option>
+        </select>
+      </div>
+      <div class="tunnel-field" id="field-ngrok-domain">
+        <label for="tunnel-ngrok-domain">ngrok Domain</label>
+        <input id="tunnel-ngrok-domain" placeholder="abc.ngrok-free.app" autocomplete="off">
+        <label for="tunnel-ngrok-token">ngrok Authtoken</label>
+        <input id="tunnel-ngrok-token" type="password" placeholder="2a..." autocomplete="new-password">
+        <small>Ambil dari Dashboard ngrok → Your Authtoken. Token disimpan di config/tunnel.json.</small>
+      </div>
+      <div class="tunnel-field" id="field-cf-token">
+        <label for="tunnel-cf-token">Cloudflare Token</label>
+        <input id="tunnel-cf-token" placeholder="ey..." autocomplete="off">
+      </div>
+      <div class="tunnel-field" id="field-cf-url">
+        <label for="tunnel-cf-url">Public URL</label>
+        <input id="tunnel-cf-url" placeholder="https://tunnel.example.com" autocomplete="off">
+      </div>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+      <input type="checkbox" id="tunnel-autostart"> Mulai tunnel otomatis saat aplikasi dibuka
+    </label>
+    <p class="tunnel-hint">Pengaturan tersimpan di config/tunnel.json</p>
+  </details>
 </div>
 
 <input class="search" id="search" type="text" placeholder="Search servers..." oninput="render()">
@@ -415,8 +538,166 @@ function toast(msg, isError) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
 }
 
+// ── Tunnel panel ──────────────────────────────────────────
+const TUNNEL_API = '/api/tunnel';
+let tunnelSettingsDirty = false;
+
+function tunnelFields() {
+  const provider = document.getElementById('tunnel-provider').value;
+  document.getElementById('field-ngrok-domain').style.display = provider === 'ngrok' ? '' : 'none';
+  document.getElementById('field-cf-token').style.display = provider === 'cloudflared-named' ? '' : 'none';
+  document.getElementById('field-cf-url').style.display = provider === 'cloudflared-named' ? '' : 'none';
+}
+
+function renderTunnel(state) {
+  const pill = document.getElementById('tunnel-pill');
+  const running = state.running === true;
+  pill.textContent = running ? 'Aktif' : 'Belum aktif';
+  pill.className = `tunnel-status-pill ${running ? 'on' : 'off'}`;
+
+  const s = state.settings || {};
+  document.getElementById('tunnel-simple-help').textContent = running
+    ? 'Tunnel aktif. Salin URL untuk menghubungkan ChatGPT.'
+    : 'Klik Mulai Tunnel. URL ChatGPT akan muncul setelah koneksi siap.';
+  if (!tunnelSettingsDirty) {
+    document.getElementById('tunnel-provider').value = s.provider || 'cloudflared-quick';
+    document.getElementById('tunnel-ngrok-domain').value = s.ngrokDomain || '';
+    document.getElementById('tunnel-ngrok-token').value = s.ngrokToken || '';
+    document.getElementById('tunnel-cf-token').value = s.cloudflaredToken || '';
+    document.getElementById('tunnel-cf-url').value = s.publicUrl || '';
+    document.getElementById('tunnel-autostart').checked = s.autoStart === true;
+  }
+  tunnelFields();
+
+  document.getElementById('box-tunnel-url').style.display = running && state.url ? '' : 'none';
+  document.getElementById('box-connector-url').style.display = running && state.connectorUrl ? '' : 'none';
+  document.getElementById('tunnel-url').textContent = state.url || '-';
+  document.getElementById('connector-url').textContent = state.connectorUrl || '-';
+
+  const errBox = document.getElementById('tunnel-error');
+  if (state.error) {
+    errBox.textContent = state.error;
+    errBox.style.display = 'block';
+  } else {
+    errBox.style.display = 'none';
+  }
+
+  document.getElementById('btn-tunnel-start').disabled = running;
+  document.getElementById('btn-tunnel-stop').disabled = !running;
+}
+
+async function loadTunnel() {
+  try {
+    const res = await fetch(TUNNEL_API);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    renderTunnel(await res.json());
+  } catch {
+    document.getElementById('tunnel-pill').textContent = 'Tidak tersedia';
+    document.getElementById('tunnel-pill').className = 'tunnel-status-pill off';
+  }
+}
+
+function tunnelPayload() {
+  const provider = document.getElementById('tunnel-provider').value;
+  return {
+    provider,
+    ngrokDomain: document.getElementById('tunnel-ngrok-domain').value.trim(),
+    ngrokToken: document.getElementById('tunnel-ngrok-token').value.trim(),
+    cloudflaredToken: document.getElementById('tunnel-cf-token').value.trim(),
+    publicUrl: document.getElementById('tunnel-cf-url').value.trim(),
+    autoStart: document.getElementById('tunnel-autostart').checked
+  };
+}
+
+async function startTunnel() {
+  const btn = document.getElementById('btn-tunnel-start');
+  btn.disabled = true;
+  btn.textContent = 'Menghubungkan...';
+  try {
+    const res = await fetch(`${TUNNEL_API}/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(tunnelPayload())
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Start gagal');
+    tunnelSettingsDirty = false;
+    renderTunnel(data);
+    toast(`Tunnel aktif: ${data.url}`);
+  } catch (err) {
+    toast(err.message, true);
+    loadTunnel();
+  } finally {
+    btn.textContent = 'Mulai Tunnel';
+    btn.disabled = document.getElementById('tunnel-pill').classList.contains('on');
+  }
+}
+
+async function stopTunnel() {
+  const btn = document.getElementById('btn-tunnel-stop');
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${TUNNEL_API}/stop`, { method: 'POST' });
+    const data = await res.json();
+    renderTunnel(data);
+    toast('Tunnel dihentikan');
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+let tunnelSaveTimer;
+async function saveTunnelSettings() {
+  clearTimeout(tunnelSaveTimer);
+  tunnelSaveTimer = setTimeout(async () => {
+    try {
+      const res = await fetch(`${TUNNEL_API}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tunnelPayload())
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Gagal menyimpan pengaturan tunnel');
+      tunnelSettingsDirty = false;
+      renderTunnel(data);
+      toast('Pengaturan tunnel tersimpan');
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }, 300);
+}
+
+async function copyTunnelUrl(id, btn) {
+  const text = document.getElementById(id).textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    btn.textContent = 'Tersalin';
+  } catch {
+    btn.textContent = 'Gagal';
+  }
+  setTimeout(() => { btn.textContent = 'Salin'; }, 1500);
+}
+
+document.getElementById('tunnel-provider').addEventListener('change', () => {
+  tunnelSettingsDirty = true;
+  tunnelFields();
+  saveTunnelSettings();
+});
+for (const id of ['tunnel-ngrok-domain', 'tunnel-ngrok-token', 'tunnel-cf-token', 'tunnel-cf-url', 'tunnel-autostart']) {
+  document.getElementById(id).addEventListener('change', () => {
+    tunnelSettingsDirty = true;
+    saveTunnelSettings();
+  });
+}
+document.getElementById('btn-tunnel-start').addEventListener('click', startTunnel);
+document.getElementById('btn-tunnel-stop').addEventListener('click', stopTunnel);
+
 load();
 setInterval(load, 10000);
+loadTunnel();
+setInterval(loadTunnel, 5000);
 </script>
 </body>
 </html>

@@ -1,0 +1,9 @@
+{
+  "apps": {
+    "mcp-agent-bridge": {
+      "id": "asdk_app_mcp_agent_bridge",
+      "type": "mcp",
+      "mcpServer": "mcp-agent-bridge"
+    }
+  }
+}

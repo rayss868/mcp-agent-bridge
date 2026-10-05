@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 
 export function buildGatewayArgs(options) {
-  const args = ['src/index.js', '--config', options.configPath, '--host', options.host, '--port', String(options.port)];
+  const args = ['src/index.js', '--config', options.configPath, '--host', options.host, '--port', String(options.port), '--no-stdio'];
 
   if (options.only && options.only.length > 0) {
     args.push('--only', options.only.join(','));

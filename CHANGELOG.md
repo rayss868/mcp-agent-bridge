@@ -2,6 +2,28 @@
 
 All notable changes to MCP Agent Bridge are documented here.
 
+## v0.4.0 — Admin UI, Tunnel Settings, and Windows Executable
+
+### Added
+
+- Local admin UI for managing MCP server configuration and tunnel settings.
+- UI controls for Cloudflare Quick Tunnel, Cloudflare Named Tunnel, and ngrok.
+- ngrok reserved-domain and Authtoken settings persisted in local `config/tunnel.json`.
+- Windows executable build using Node.js Single Executable Application (SEA), with a custom application icon.
+- Launcher health check and automatic browser opening after startup.
+- `scripts/start-all-ngrok.bat` reads the ngrok domain and token from the saved UI settings.
+
+### Security and distribution notes
+
+- Local configuration files and build output are excluded from Git.
+- The Windows executable is generated locally at `dist/mcp-bridge.exe` and is not committed to the repository.
+
+### Updated
+
+- README setup, project structure, executable build, and tunnel configuration documentation.
+
+---
+
 ## v0.3.2 — Performance: Cloudflare Tunnel Latency Fix
 
 ### Problem

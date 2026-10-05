@@ -38,3 +38,14 @@ test('touches sessions when they are accessed', async () => {
   assert.equal(transport.closeCalls, 1);
   await registry.close();
 });
+
+test('closes a transport only once when cleanup is triggered repeatedly', async () => {
+  const transport = deferredTransport();
+  const registry = createSessionRegistry({ ttlMs: 15 });
+
+  registry.set('session-1', transport);
+  await registry.close();
+  await registry.close();
+
+  assert.equal(transport.closeCalls, 1);
+});

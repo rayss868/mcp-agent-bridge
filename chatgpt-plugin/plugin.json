@@ -1,0 +1,18 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "mcp-agent-bridge",
+  "version": "1.0.0",
+  "description": "Unified MCP gateway — discover and execute tools across multiple child servers (hosting, PC control, AI image/video, browser automation).",
+  "extensions": {
+    "com.openai": {
+      "apps": "./.app.json",
+      "interface": {
+        "displayName": "MCP Agent Bridge",
+        "shortDescription": "Dynamic MCP gateway for hosting, PC, AI generation, and browser tools.",
+        "longDescription": "A unified MCP server bridge that aggregates multiple child servers. Use bridge__list_servers to discover available servers, bridge__list_server_tools for tool schemas, and bridge__execute to run any tool.",
+        "developerName": "rayss868",
+        "category": "Other"
+      }
+    }
+  }
+}

@@ -6,3 +6,11 @@ tools/cloudflared.exe
 # Use the *.example.json templates as a starting point
 config/default.json
 config/vision-web.json
+config/tunnel.json
+
+# Generated build output
+/dist/
+
+# Local test artifacts
+/speedtest.bin
+/ngrok.log

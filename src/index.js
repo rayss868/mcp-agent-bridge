@@ -13,8 +13,10 @@ import { loadGatewayConfig, parseCliArgs } from './config.js';
 import { ChildServerManager } from './childServers.js';
 import { createGatewayServer } from './router.js';
 import { createSessionRegistry } from './mcpSessions.js';
+import { TunnelManager } from './tunnel.js';
+import { getProjectRoot, isSeaBuild, readUiHtml } from './sea-paths.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = getProjectRoot(import.meta.url);
 
 function sendJson(res, status, body) {
   res.status(status).json(body);
@@ -152,6 +154,27 @@ function startConfigWatcher(configPath, onlyValue, manager, onReload) {
 
 async function main() {
   const options = parseCliArgs(process.argv.slice(2));
+  if (isSeaBuild()) {
+    const hasStdioFlag = process.argv.includes('--stdio') || process.argv.includes('--no-stdio');
+    if (!hasStdioFlag) options.stdio = false;
+    if (!options.configPath) {
+      const { mkdir, writeFile, access } = await import('node:fs/promises');
+      const cfgDir = path.join(__dirname, 'config');
+      await mkdir(cfgDir, { recursive: true }).catch(() => {});
+      const defCfg = path.join(cfgDir, 'default.json');
+      try { await access(defCfg); }
+      catch {
+        try {
+          const sea = process.getBuiltinModule('node:sea');
+          const embedded = sea.getAsset('config/default.example.json', 'utf8');
+          if (embedded) await writeFile(defCfg, embedded, 'utf8');
+        } catch {}
+        try { await access(defCfg); }
+        catch { await writeFile(defCfg, '{\n  "mcpServers": {}\n}\n', 'utf8'); }
+      }
+      options.configPath = defCfg;
+    }
+  }
   const gatewayConfig = await loadGatewayConfig(options.configPath, options.only);
 
   // Set is filled in below once we know whether we're in stdio or HTTP mode.
@@ -170,9 +193,9 @@ async function main() {
   await childServerManager.start();
 
   if (options.stdio) {
+    const { server, invalidateToolsCache } = createGatewayServer(childServerManager);
     const stopWatcher = startConfigWatcher(gatewayConfig.resolvedConfigPath, options.only, childServerManager, invalidateToolsCache);
 
-    const { server, invalidateToolsCache } = createGatewayServer(childServerManager);
     activeServers.add(server);
     const transport = new StdioServerTransport();
 
@@ -346,12 +369,74 @@ async function main() {
     }
   });
 
+  // ── REST API for ChatGPT Plugin ─────────────────────────────
+  // Thin REST wrapper — ChatGPT discovers tools dynamically via /bridge/servers.
+  app.get('/bridge/servers', async (_req, res) => {
+    const summary = childServerManager.getStartupSummary();
+    const servers = summary.loadedServers.map((s) => ({
+      name: s.serverName,
+      toolCount: s.toolCount,
+      tools: (childServerManager.getToolsForServer(s.serverName) ?? []).map((t) => t.name.replace(`${s.serverName}__`, ''))
+    }));
+    res.json({ servers });
+  });
+
+  app.get('/bridge/servers/:name/tools', async (req, res) => {
+    const tools = childServerManager.getToolsForServer(req.params.name);
+    if (!tools) {
+      return res.status(404).json({ error: `Server "${req.params.name}" not found` });
+    }
+    res.json({
+      server: req.params.name,
+      toolCount: tools.length,
+      tools: tools.map((t) => ({ name: t.name.replace(`${req.params.name}__`, ''), description: t.description, inputSchema: t.inputSchema }))
+    });
+  });
+
+  app.post('/bridge/execute', async (req, res) => {
+    const { server, tool, args } = req.body ?? {};
+    if (!server || !tool) {
+      return sendJson(res, 400, { error: 'Missing "server" or "tool"' });
+    }
+    try {
+      const result = await childServerManager.callTool(`${server}__${tool}`, args ?? {});
+      res.json({ ok: true, result });
+    } catch (error) {
+      res.json({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post('/bridge/batch', async (req, res) => {
+    const { operations, stopOnError } = req.body ?? {};
+    if (!Array.isArray(operations) || operations.length === 0) {
+      return sendJson(res, 400, { error: '"operations" must be a non-empty array' });
+    }
+    const stop = stopOnError !== false;
+    const results = [];
+    for (let i = 0; i < operations.length; i++) {
+      const op = operations[i];
+      if (!op?.server || !op?.tool) {
+        results.push({ index: i, ok: false, error: 'Missing server/tool' });
+        if (stop) break;
+        continue;
+      }
+      try {
+        const result = await childServerManager.callTool(`${op.server}__${op.tool}`, op.args ?? {});
+        results.push({ index: i, server: op.server, tool: op.tool, ok: true, result });
+      } catch (error) {
+        results.push({ index: i, server: op.server, tool: op.tool, ok: false, error: error instanceof Error ? error.message : String(error) });
+        if (stop) break;
+      }
+    }
+    res.json({ ok: true, total: operations.length, completed: results.length, results });
+  });
+
   // ── Admin UI routes ──────────────────────────────────────────
   const uiDir = path.resolve(__dirname, '..', 'ui');
 
   app.get(['/', '/ui'], async (_req, res) => {
     try {
-      const html = await readFile(path.join(uiDir, 'index.html'), 'utf8');
+      const html = await readUiHtml(import.meta.url);
       res.type('html').send(html);
     } catch {
       res.status(404).send('UI not found');
@@ -514,13 +599,43 @@ async function main() {
     }
   });
 
+  // ── Tunnel control ──────────────────────────────────────────
+  const tunnelManager = new TunnelManager({ host: options.host, port: options.port });
+  await tunnelManager.loadSettings();
+
+  app.get('/api/tunnel', (_req, res) => {
+    res.json(tunnelManager.status());
+  });
+
+  app.put('/api/tunnel/settings', async (req, res) => {
+    try {
+      await tunnelManager.saveSettings(req.body ?? {});
+      res.json(tunnelManager.status());
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/tunnel/start', async (req, res) => {
+    try {
+      const state = await tunnelManager.start(req.body ?? {});
+      res.json(state);
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/tunnel/stop', (_req, res) => {
+    res.json(tunnelManager.stop());
+  });
+
   const stopWatcher = startConfigWatcher(gatewayConfig.resolvedConfigPath, options.only, childServerManager, () => {
     for (const server of activeServers) {
       server.sendToolListChanged?.();
     }
   });
 
-  const serverInstance = app.listen(options.port, options.host, (error) => {
+  const serverInstance = app.listen(options.port, options.host, async (error) => {
     if (error) {
       console.error('Failed to start gateway:', error);
       process.exit(1);
@@ -528,13 +643,31 @@ async function main() {
 
     const summary = childServerManager.getStartupSummary();
     console.log(`Gateway listening at http://${options.host}:${options.port}/mcp`);
+    if (isSeaBuild() && !options.stdio) {
+      const url = `http://${options.host}:${options.port}`;
+      const { spawn } = await import('node:child_process');
+      try {
+        const ch = spawn('cmd', ['/c', 'start', '', url], { stdio: 'ignore', detached: true, windowsHide: true });
+        ch.on('error', () => {});
+        ch.unref();
+      } catch {}
+    }
     console.log(`Health endpoint: http://${options.host}:${options.port}/health`);
     console.log(`Loaded servers: ${summary.loadedServers.map((server) => `${server.serverName} (${server.toolCount})`).join(', ') || '(none)'}`);
     console.log(`Skipped servers: ${summary.skippedServers.map((server) => `${server.serverName}:${server.reason}`).join(', ') || '(none)'}`);
+
+    if (tunnelManager.settings.autoStart && !tunnelManager.isRunning()) {
+      tunnelManager.start().then((state) => {
+        console.log(`Tunnel running at ${state.url} (provider: ${state.provider})`);
+      }).catch((error) => {
+        console.error(`Tunnel auto-start failed: ${error.message}`);
+      });
+    }
   });
 
   const shutdown = async () => {
     stopWatcher();
+    tunnelManager.stop();
     await new Promise((resolve) => serverInstance.close(resolve));
     await sessions.close();
     for (const server of activeServers) {

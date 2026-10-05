@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="banner-agent_2026-06-19T04-33-42-408Z.png" alt="MCP Agent Bridge Banner" width="100%">
-</p>
-
 # MCP Agent Bridge
 
 > 🚀 A lightweight **agent gateway** that combines multiple local **MCP servers** into a single **MCP endpoint** — with **runtime control**, **hot-reloadable configuration**, and a powerful **`bridge__execute`** tool that lets you call any child server tool without restarting.
@@ -16,31 +12,46 @@
 
 ---
 
+## 🚀 Latest release: v0.4.0
+
+This release adds a local admin UI, integrated tunnel settings, and a Windows executable built with Node.js SEA so users can run the bridge without installing Node.js.
+
+### Highlights
+
+- Local admin UI at `http://127.0.0.1:8787/` for managing MCP server and tunnel settings.
+- Select and save a tunnel provider in the UI: Cloudflare Quick Tunnel, Cloudflare Named Tunnel, or ngrok.
+- Configure ngrok with a reserved domain and Authtoken. The token is stored locally in `config/tunnel.json` and passed to the ngrok process through its environment.
+- The launcher waits for the gateway health check before opening the admin UI in a browser.
+- Build a Windows executable using Node.js Single Executable Application (SEA), with a custom application icon.
+- `scripts/start-all-ngrok.bat` reads the ngrok domain and token from the same saved tunnel settings used by the UI.
+- Includes the Cloudflare tunnel performance and MCP session lifecycle improvements from previous releases.
+
+### Requirements and notes
+
+- Running from source requires Node.js 20 or later.
+- ngrok requires an account, a reserved domain, an Authtoken, and `ngrok.exe` at `%USERPROFILE%\\bin\\ngrok.exe` (or set `NGROK_PATH` for the UI launcher).
+- Cloudflare Quick Tunnel uses `tools/cloudflared.exe`; Cloudflare Named Tunnel requires a tunnel token and public URL.
+- Local settings and credentials are stored in `config/default.json` and `config/tunnel.json`. Do not share these files.
+- The built executable is written to `dist/mcp-bridge.exe`; build output is not tracked by Git.
+
+### Build the executable
+
+```bash
+npm install
+npm run build:exe
+```
+
+Building for Windows requires Node.js and the project's development dependencies. Run `dist/mcp-bridge.exe` after the build completes.
+
+---
+
 ## ✨ What's new in v0.3.2
 
-### Performance: Cloudflare Tunnel latency fix
-
-**Problem:** ChatGPT accessing MCP Bridge through Cloudflare Tunnel experiences significant latency.
-
-**Root causes identified:**
-- Tunnel running on HTTP/1.1 instead of HTTP/2 (no multiplexing)
-- No response compression — large JSON payloads sent uncompressed through tunnel
-- Tools list rebuilt on every `tools/list` request even when unchanged
-- Bridge meta tool descriptions excessively verbose (~400 words for `bridge__execute`)
-- Batch response JSON pretty-printed (`JSON.stringify(..., null, 2)`) adding unnecessary whitespace
-- SSE keepalive interval (15s) not aggressive enough for Cloudflare's idle timeout
-
-**Changes applied:**
-
-| Area | Before | After |
-|------|--------|-------|
-| Tunnel protocol | HTTP/1.1 | HTTP/2 (`--protocol http2`) |
-| Response compression | None | gzip level 6 for JSON >256B |
-| Tools list caching | Rebuilt every call | Cached, invalidated on config change |
-| `bridge__execute` description | ~400 words | ~40 words |
-| Batch response | Pretty-printed | Compact JSON |
-| SSE keepalive | 15s | 10s |
-| Config reload | No client notification | `sendToolListChanged` broadcast |
+- Reduced Cloudflare tunnel latency with HTTP/2.
+- Added gzip compression for JSON responses larger than 256 bytes.
+- Cached MCP tool lists and invalidated the cache when configuration changes.
+- Shortened meta-tool descriptions and compacted batch response JSON.
+- Reduced the SSE keepalive interval to 10 seconds and notified clients when the tool list changes.
 
 ---
 
@@ -592,74 +603,32 @@ AI: "cpanel is back. You can use it now."
 
 ## 📁 Project structure
 
-```mermaid
-graph TB
-    subgraph Root["📁 MCP_Bridge"]
-        direction TB
-        R1["config/"]
-        R2["src/"]
-        R3["tools/"]
-        R4["package.json"]
-        R5["README.md"]
-    end
-
-    subgraph Config["📁 config"]
-        direction TB
-        C1["default.json<br/><i>Real config (gitignored)</i>"]
-        C2["default.example.json<br/><i>Sanitized template</i>"]
-        C3["README.md<br/><i>Setup guide</i>"]
-    end
-
-    subgraph Src["📁 src"]
-        direction TB
-        S1["index.js<br/><i>Main server, auth, watcher</i>"]
-        S2["config.js<br/><i>CLI args, config loading</i>"]
-        S3["childServers.js<br/><i>Lifecycle, tool map, health</i>"]
-        S4["router.js<br/><i>5 meta tools</i>"]
-        S5["cli/<br/><i>Launcher</i>"]
-    end
-
-    subgraph Tools["📁 tools"]
-        direction TB
-        T1["cloudflared.exe<br/><i>Tunnel helper</i>"]
-    end
-
-    R1 --> Config
-    R2 --> Src
-    R3 --> Tools
-
-    style Root fill:#0f3460,stroke:#533483,color:#fff
-    style Config fill:#1a1a2e,stroke:#e94560,color:#fff
-    style Src fill:#16213e,stroke:#0f3460,color:#fff
-    style Tools fill:#1a1a2e,stroke:#e94560,color:#fff
-    style R1 fill:#533483,stroke:#fff,color:#fff
-    style R2 fill:#533483,stroke:#fff,color:#fff
-    style R3 fill:#533483,stroke:#fff,color:#fff
-    style R4 fill:#533483,stroke:#fff,color:#fff
-    style R5 fill:#533483,stroke:#fff,color:#fff
-    style C1 fill:#e94560,stroke:#fff,color:#fff
-    style C2 fill:#533483,stroke:#fff,color:#fff
-    style C3 fill:#533483,stroke:#fff,color:#fff
-    style S1 fill:#e94560,stroke:#fff,color:#fff
-    style S2 fill:#533483,stroke:#fff,color:#fff
-    style S3 fill:#533483,stroke:#fff,color:#fff
-    style S4 fill:#e94560,stroke:#fff,color:#fff
-    style S5 fill:#533483,stroke:#fff,color:#fff
-    style T1 fill:#533483,stroke:#fff,color:#fff
+```text
+config/                 Example templates and local settings (do not share local settings)
+src/                    MCP server, router, child-server manager, and tunnel manager
+src/cli/                CLI launcher and startup utilities
+ui/                     Local admin UI
+scripts/                SEA build, icon, launcher, and Windows tunnel scripts
+tools/                  cloudflared binary for Cloudflare tunnels
+test/                   Automated tests
+dist/                   Local build output (ignored by Git)
+chatgpt-plugin/         ChatGPT plugin metadata and icon
 ```
 
-### Important files
+### Key files
 
 | File | Purpose |
 |---|---|
-| `src/index.js` | Main HTTP server, session handling, auth, routes, config watcher |
-| `src/config.js` | CLI argument parsing and config loading |
-| `src/childServers.js` | Child server lifecycle, tool map, health check, enable/disable persistence, `getToolsForServer()` |
-| `src/router.js` | Gateway MCP server with 5 meta tools (`list_servers`, `disable_server`, `enable_server`, `execute`, `list_server_tools`) |
-| `src/cli/ui.js` | Interactive launcher with prompts |
-| `src/cli/launch.js` | Process spawner for gateway & tunnel |
-| `config/default.json` | Main config (gitignored — contains your secrets) |
-| `config/default.example.json` | Sanitized template — safe to commit |
+| `src/index.js` | HTTP server, MCP endpoint, admin API, sessions, and configuration reload |
+| `src/router.js` | Meta tools for discovering servers/tools and executing child-server tools |
+| `src/childServers.js` | Starts child servers, maps tools, and manages server state |
+| `src/tunnel.js` | Stores tunnel settings and manages Cloudflare/ngrok processes |
+| `src/cli/launcher.js` | Starts the gateway and opens the admin UI after the health check |
+| `ui/index.html` | Admin UI for server and tunnel configuration |
+| `config/default.example.json` | Safe template for MCP server configuration |
+| `config/tunnel.json` | Local tunnel settings; may contain secret tokens |
+| `scripts/build-sea.cjs` | Builds the Windows executable into `dist/` |
+| `scripts/start-all-ngrok.bat` | Starts the gateway and ngrok using settings saved by the UI |
 
 ---
 
