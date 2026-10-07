@@ -643,15 +643,6 @@ async function main() {
 
     const summary = childServerManager.getStartupSummary();
     console.log(`Gateway listening at http://${options.host}:${options.port}/mcp`);
-    if (isSeaBuild() && !options.stdio) {
-      const url = `http://${options.host}:${options.port}`;
-      const { spawn } = await import('node:child_process');
-      try {
-        const ch = spawn('cmd', ['/c', 'start', '', url], { stdio: 'ignore', detached: true, windowsHide: true });
-        ch.on('error', () => {});
-        ch.unref();
-      } catch {}
-    }
     console.log(`Health endpoint: http://${options.host}:${options.port}/health`);
     console.log(`Loaded servers: ${summary.loadedServers.map((server) => `${server.serverName} (${server.toolCount})`).join(', ') || '(none)'}`);
     console.log(`Skipped servers: ${summary.skippedServers.map((server) => `${server.serverName}:${server.reason}`).join(', ') || '(none)'}`);

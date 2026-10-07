@@ -13,7 +13,7 @@ t = t.replace(`  // \u2500\u2500 Admin UI routes \u2500\u2500\u2500\u2500\u2500\
 t = t.replace(`      const html = await readFile(path.join(uiDir, 'index.html'), 'utf8');`,
 `      const html = await readUiHtml(import.meta.url);`);
 t = t.replace("    console.log(`Gateway listening at http://${options.host}:${options.port}/mcp`);",
-`    console.log(\`Gateway listening at http://\${options.host}:\${options.port}/mcp\`);\n    if (isSeaBuild() && !options.stdio) {\n      const url = \`http://\${options.host}:\${options.port}\`;\n      const { spawn } = await import('node:child_process');\n      try {\n        const ch = spawn('cmd', ['/c', 'start', '', url], { stdio: 'ignore', detached: true, windowsHide: true });\n        ch.on('error', () => {});\n        ch.unref();\n      } catch {}\n    }`);
+`    console.log(\`Gateway listening at http://\${options.host}:\${options.port}/mcp\`);`);
 fs.writeFileSync('src/index.js', t);
 console.log('index patched');
 
